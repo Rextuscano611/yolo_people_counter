@@ -1,0 +1,7 @@
+venv/
+models/
+data/videos/
+data/db/
+.env
+__pycache__/
+*.pyc
