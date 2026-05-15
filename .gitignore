@@ -5,3 +5,5 @@ data/db/
 .env
 __pycache__/
 *.pyc
+*.pth
+.vscode/
