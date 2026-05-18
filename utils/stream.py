@@ -29,7 +29,10 @@ class StreamReader:
         while True:
             success, frame = self.read()
             if not success:
-                break
+
+                 # Loop back to start of video
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
             yield frame
 
     def is_opened(self):
