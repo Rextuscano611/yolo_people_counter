@@ -67,21 +67,14 @@ def get_today_summary():
 
 
 def get_weekly_summary():
-    """
-    Returns total IN, OUT and peak occupancy for the current week (Mon–today).
-    Also returns daily breakdown for the 7-day trend chart.
-    """
+    """Returns last 7 days total + daily breakdown."""
     conn = get_connection()
     cursor = conn.cursor()
-
-    # Last 7 days including today
     today = datetime.now().date()
     days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
 
     daily = []
-    total_in = 0
-    total_out = 0
-    peak_occ = 0
+    total_in = total_out = peak_occ = 0
 
     for day in days:
         cursor.execute("""
@@ -89,20 +82,17 @@ def get_weekly_summary():
                 COALESCE(SUM(count_in), 0),
                 COALESCE(SUM(count_out), 0),
                 COALESCE(MAX(peak_ocupancy), 0)
-            FROM hourly_footfall
-            WHERE hour LIKE ?
+            FROM hourly_footfall WHERE hour LIKE ?
         """, (f"{day}%",))
         row = cursor.fetchone()
-        day_in, day_out, day_peak = row[0], row[1], row[2]
-
+        day_in, day_out, day_peak = row
         daily.append({
-            "date":     day,
-            "label":    datetime.strptime(day, "%Y-%m-%d").strftime("%a %d"),
-            "count_in":  day_in,
-            "count_out": day_out,
+            "date":           day,
+            "label":          datetime.strptime(day, "%Y-%m-%d").strftime("%a %d"),
+            "count_in":       day_in,
+            "count_out":      day_out,
             "peak_occupancy": day_peak
         })
-
         total_in  += day_in
         total_out += day_out
         peak_occ   = max(peak_occ, day_peak)
@@ -117,17 +107,11 @@ def get_weekly_summary():
 
 
 def get_monthly_summary():
-    """
-    Returns total IN, OUT and peak occupancy for the current month.
-    Also returns daily breakdown for each day of the current month.
-    """
+    """Returns current month total + daily breakdown."""
     conn = get_connection()
     cursor = conn.cursor()
-
     today = datetime.now().date()
-    year_month = today.strftime("%Y-%m")
 
-    # All days from 1st of month to today
     days = []
     day = today.replace(day=1)
     while day <= today:
@@ -135,9 +119,7 @@ def get_monthly_summary():
         day += timedelta(days=1)
 
     daily = []
-    total_in = 0
-    total_out = 0
-    peak_occ = 0
+    total_in = total_out = peak_occ = 0
 
     for d in days:
         cursor.execute("""
@@ -145,12 +127,10 @@ def get_monthly_summary():
                 COALESCE(SUM(count_in), 0),
                 COALESCE(SUM(count_out), 0),
                 COALESCE(MAX(peak_ocupancy), 0)
-            FROM hourly_footfall
-            WHERE hour LIKE ?
+            FROM hourly_footfall WHERE hour LIKE ?
         """, (f"{d}%",))
         row = cursor.fetchone()
-        day_in, day_out, day_peak = row[0], row[1], row[2]
-
+        day_in, day_out, day_peak = row
         daily.append({
             "date":           d,
             "label":          datetime.strptime(d, "%Y-%m-%d").strftime("%d"),
@@ -158,7 +138,6 @@ def get_monthly_summary():
             "count_out":      day_out,
             "peak_occupancy": day_peak
         })
-
         total_in  += day_in
         total_out += day_out
         peak_occ   = max(peak_occ, day_peak)
@@ -174,34 +153,65 @@ def get_monthly_summary():
 
 
 def get_busiest_days():
-    """
-    Returns average visitors per day of week (Mon–Sun) across all recorded data.
-    Useful for staff scheduling — shows which days are historically busiest.
-    """
+    """Average visitors per day of week (Mon–Sun) across all data."""
     conn = get_connection()
     cursor = conn.cursor()
-
-    # SQLite strftime %w: 0=Sunday, 1=Monday ... 6=Saturday
     cursor.execute("""
         SELECT
             CAST(strftime('%w', hour) AS INTEGER) AS dow,
             COALESCE(SUM(count_in), 0)            AS total_in,
             COUNT(DISTINCT substr(hour, 1, 10))    AS num_days
         FROM hourly_footfall
-        GROUP BY dow
-        ORDER BY dow ASC
+        GROUP BY dow ORDER BY dow ASC
     """)
     rows = cursor.fetchall()
     conn.close()
 
     day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
     result = {name: 0 for name in day_names}
     for row in rows:
         dow, total_in, num_days = row
-        avg = round(total_in / num_days) if num_days > 0 else 0
-        result[day_names[dow]] = avg
+        result[day_names[dow]] = round(total_in / num_days) if num_days > 0 else 0
 
-    # Return in Mon–Sun order for the chart
     ordered = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return [{"day": d, "avg_visitors": result[d]} for d in ordered]
+
+
+def get_yearly_heatmap():
+    """
+    Returns daily visitor counts for every day of the current year
+    up to today.
+
+    Returns:
+        {
+            "year": 2026,
+            "data": {"2026-01-15": 45, "2026-05-17": 13, ...},
+            "max_count": 45
+        }
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    year = datetime.now().year
+
+    cursor.execute("""
+        SELECT
+            substr(hour, 1, 10)   AS date,
+            SUM(count_in)         AS total_in
+        FROM hourly_footfall
+        WHERE hour LIKE ?
+        GROUP BY date
+        ORDER BY date ASC
+    """, (f"{year}-%",))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    data = {row[0]: row[1] for row in rows if row[1] and row[1] > 0}
+    max_count = max(data.values()) if data else 0
+
+    return {
+        "year":      year,
+        "data":      data,
+        "max_count": max_count
+    }
